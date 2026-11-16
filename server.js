@@ -12,49 +12,50 @@ const io = new Server(server, {
 });
 
 let tiktokConnection = null;
-let cuvântCheieCurent = "";
+let cuvantCheieCurent = "";
 let stocMaxim = 5;
 let listaComenzi = [];
 
 io.on('connection', (socket) => {
-    console.log('Operator conectat la panou.');
-    // Trimite datele curente la conectare
-    socket.emit('actualizare_lista', { listaComenzi, cuvântCheieCurent, stocMaxim });
+    socket.emit('actualizare_lista', { listaComenzi, cuvantCheieCurent, stocMaxim });
 
-    // Pornire conectare la TikTok Live
     socket.on('conectare_tiktok', (data) => {
         const username = data.username.replace('@', '').trim();
         if (tiktokConnection) {
             tiktokConnection.disconnect();
         }
 
-        tiktokConnection = new WebcastPushConnection(username);
-
-        tiktokConnection.connect().then(state => {
-            console.log(`Conectat la live-ul lui ${username}`);
-            socket.emit('status_tiktok', { conectat: true, mesaj: `Conectat la @${username}` });
-        }).catch(err => {
-            console.error('Eroare conectare:', err);
-            socket.emit('status_tiktok', { conectat: false, mesaj: 'Eroare: Live-ul nu a fost găsit sau nu este activ.' });
+        // Adăugăm opțiuni pentru a simula un browser normal
+        tiktokConnection = new WebcastPushConnection(username, {
+            processInitialData: false,
+            enableExtendedGiftInfo: false,
+            requestOptions: {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                }
+            }
         });
 
-        // Ascultă fiecare mesaj din chat
+        tiktokConnection.connect().then(state => {
+            socket.emit('status_tiktok', { conectat: true, mesaj: `Conectat la @${username} (Room ID: ${state.roomId})` });
+        }).catch(err => {
+            // Trimite eroarea exactă pe site ca să vedem de ce blochează TikTok
+            const mesajEroare = err.message || JSON.stringify(err);
+            socket.emit('status_tiktok', { conectat: false, mesaj: `Eroare TikTok: ${mesajEroare}` });
+        });
+
         tiktokConnection.on('chat', (chatData) => {
-            if (!cuvântCheieCurent) return;
+            if (!cuvantCheieCurent) return;
 
             const mesaj = chatData.comment.toLowerCase().trim();
             const user = chatData.uniqueId;
             const numeAfisat = chatData.nickname;
 
-            // Verifică dacă mesajul conține cuvântul cheie
-            if (mesaj.includes(cuvântCheieCurent.toLowerCase())) {
-                // Caută un grup de 3 cifre în mesaj (ultimele 3 cifre din telefon)
+            if (mesaj.includes(cuvantCheieCurent.toLowerCase())) {
                 const matchCifre = mesaj.match(/\b\d{3}\b/);
 
                 if (matchCifre) {
                     const cifreTelefon = matchCifre[0];
-
-                    // Verifică dacă acest utilizator a comandat deja acest produs
                     const dejaComandat = listaComenzi.some(c => c.user === user);
                     if (!dejaComandat) {
                         const comandaNoua = {
@@ -68,19 +69,18 @@ io.on('connection', (socket) => {
                         };
 
                         listaComenzi.push(comandaNoua);
-                        io.emit('actualizare_lista', { listaComenzi, cuvântCheieCurent, stocMaxim });
+                        io.emit('actualizare_lista', { listaComenzi, cuvantCheieCurent, stocMaxim });
                     }
                 }
             }
         });
     });
 
-    // Setare produs nou (resetează lista)
     socket.on('produs_nou', (data) => {
-        cuvântCheieCurent = data.cuvant.trim();
+        cuvantCheieCurent = data.cuvant.trim();
         stocMaxim = parseInt(data.stoc) || 1;
         listaComenzi = [];
-        io.emit('actualizare_lista', { listaComenzi, cuvântCheieCurent, stocMaxim });
+        io.emit('actualizare_lista', { listaComenzi, cuvantCheieCurent, stocMaxim });
     });
 });
 
